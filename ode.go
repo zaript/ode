@@ -76,6 +76,7 @@ func NewSolverStepRK4(yp YPrime, prm SolverPrm) SolverStep {
 			for iEq := range y {
 				y[iEq] += dt * (dy1[iEq] + 2*(dy2[iEq]+dy3[iEq]) + dy4[iEq]) / 6
 			}
+			dt = m.Min(dt, prm.TEnd()-t)
 			return t + dt, y
 		}
 	return solverStep
