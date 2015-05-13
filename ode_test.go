@@ -9,7 +9,8 @@ import (
 type prm struct {
 	nEq    uint64  // number of equations
 	dt     float64 // initial time step
-	tol    float64 // error tolerance
+	atol   float64 // absolute error tolerance
+	rtol   float64 // relative error tolerance
 	safety float64 // safety factor on new step selection
 	tStart float64 // starting time (usually 0)
 	tEnd   float64 // finish time (maximal value of t)
@@ -18,7 +19,7 @@ type prm struct {
 
 // prm should implement SolverPrm interface.
 func (p prm) NEq() uint64     { return p.nEq }
-func (p prm) Tol() float64    { return p.tol }
+func (p prm) Tol() float64    { return p.rtol }
 func (p prm) TEnd() float64   { return p.tEnd }
 func (p prm) Safety() float64 { return p.safety }
 
@@ -57,7 +58,8 @@ func yExactExpODE(t float64, prm prm) []float64 {
 // higher than given tolerance*10.
 func Test_NewSolverStepRKM_expODE(test *testing.T) {
 	prm := prm{
-		tol:    1e-4,
+		atol:   1e-4,
+		rtol:   1e-4,
 		safety: 0.8,
 		dt:     1e-4,
 		tStart: 0.,
@@ -89,8 +91,8 @@ func Test_NewSolverStepRKM_expODE(test *testing.T) {
 			y_exact := yExactExpODE(t, prm)
 			for i := range y {
 				e := m.Abs(y[i] - y_exact[i])
-				if e >= prm.tol*10 {
-					test.Error("t =", t, "iT =", iT, "e =", e, "tol =", prm.tol,
+				if e >= prm.atol*10 {
+					test.Error("t =", t, "iT =", iT, "e =", e, "tol =", prm.atol,
 						"i =", i, "y =", y[i], "y_exact =", y_exact[i])
 				}
 			}
@@ -114,7 +116,8 @@ func Test_NewSolverStepRKM_expODE(test *testing.T) {
 // higher than given tolerance.
 func Test_NewSolverStepRK4_expODE(test *testing.T) {
 	prm := prm{
-		tol:    1e-4,
+		atol:   1e-4,
+		rtol:   1e-4,
 		safety: 0.0,
 		dt:     1e-3,
 		tStart: 0.,
@@ -144,8 +147,8 @@ func Test_NewSolverStepRK4_expODE(test *testing.T) {
 			y_exact := yExactExpODE(t, prm)
 			for i := range y {
 				e := m.Abs(y[i] - y_exact[i])
-				if e >= prm.tol*10 {
-					test.Error("t =", t, "iT =", iT, "e =", e, "tol =", prm.tol,
+				if e >= prm.atol*10 {
+					test.Error("t =", t, "iT =", iT, "e =", e, "tol =", prm.atol,
 						"i =", i, "y =", y[i], "y_exact =", y_exact[i])
 				}
 			}
@@ -163,7 +166,8 @@ func Test_NewSolverStepRK4_expODE(test *testing.T) {
 // for comparison
 func (p prm) initBench() prm {
 	p = prm{
-		tol:    1e-6,
+		atol:   1e-6,
+		rtol:   1e-6,
 		safety: 0.8,
 		dt:     1e-6,
 		tStart: 0.,
