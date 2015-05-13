@@ -1,6 +1,7 @@
 package ode
 
 import (
+	"fmt"
 	m "math"
 	"testing"
 )
@@ -228,6 +229,12 @@ func Benchmark_NewSolverStepRK4_expODE(b *testing.B) {
 	}
 }
 
+// Set of problems used for testing below composed by:
+// Mazzia, Francesca and Magherini, Cecilia,
+// Test Set for Initial Value Problem Solvers, release 2.4, February 2008,
+// Department of Mathematics, University of Bari and INdAM, Research Unit of Bari,
+// Available at http://www.dm.uniba.it/~testset.
+
 // Checks if a and b are equal within a tolerance.
 // TODO NaN and Inf checks
 func withinTol(a, b, rtol, atol float64) bool {
@@ -244,4 +251,75 @@ func allWithinTol(a, b []float64, rtol, atol float64) bool {
 		tmp = tmp && withinTol(a[i], b[i], rtol, atol)
 	}
 	return tmp
+}
+
+// HIRES problem (ODE)
+func Test_HIRES(test *testing.T) {
+	prm := prm{
+		atol:   1.1e-6,
+		rtol:   1.1e-6,
+		safety: 0.8,
+		dt:     1.1e-3,
+		tStart: 0.,
+		tEnd:   321.8122,
+		ndt:    50000,
+		nEq:    8,
+	}
+	y0 := []float64{1, 0, 0, 0, 0, 0, 0, 0.0057}
+	yRef := []float64{
+		0.7371312573325668e-3,
+		0.1442485726316185e-3,
+		0.5888729740967575e-4,
+		0.1175651343283149e-2,
+		0.2386356198831331e-2,
+		0.6238968252742796e-2,
+		0.2849998395185769e-2,
+		0.2850001604814231e-2,
+	}
+	hiresYPrime :=
+		func(t float64, y []float64, prm SolverPrm) []float64 {
+			f := make([]float64, len(y))
+			f[0] = -1.71*y[0] + 0.43*y[1] + 8.32*y[2] + 0.0007
+			f[1] = 1.71*y[0] - 8.75*y[1]
+			f[2] = -10.03*y[2] + 0.43*y[3] + 0.035*y[4]
+			f[3] = 8.32*y[1] + 1.71*y[2] - 1.12*y[3]
+			f[4] = -1.745*y[4] + 0.43*(y[5]+y[6])
+			f[5] = -280*y[5]*y[7] + 0.69*y[3] + 1.71*y[4] - 0.43*y[5] + 0.69*y[6]
+			f[6] = 280*y[5]*y[7] - 1.81*y[6]
+			f[7] = -f[6]
+			return f
+		}
+
+	adaptiveStep := NewSolverStepRKM(hiresYPrime, prm)
+
+	y := make([]float64, prm.nEq)
+	copy(y, y0)
+	t := prm.tStart
+	dt := prm.dt
+	for t < prm.tEnd {
+		t, y, dt = adaptiveStep(t, y, dt)
+	}
+	if !allWithinTol(y, yRef, prm.rtol, prm.atol) {
+		// TODO turn this into nice log output
+		fmt.Println("y =", y)
+		fmt.Println("yRef =", yRef)
+		test.Error("RKM: HIRES failed.")
+	}
+
+	// TODO Should probably be in separate function, but I want to avoid code
+	// duplication until things stabilize a bit
+	fixedStep := NewSolverStepRK4(hiresYPrime, prm)
+
+	copy(y, y0)
+	t = prm.tStart
+	dt = prm.dt
+	for t < prm.tEnd {
+		t, y = fixedStep(t, y, dt)
+	}
+	if !allWithinTol(y, yRef, prm.rtol, prm.atol) {
+		// TODO turn this into nice log output
+		fmt.Println("y =", y)
+		fmt.Println("yRef =", yRef)
+		test.Error("RK4: HIRES failed.")
+	}
 }
