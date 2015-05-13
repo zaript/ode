@@ -227,3 +227,21 @@ func Benchmark_NewSolverStepRK4_expODE(b *testing.B) {
 		}
 	}
 }
+
+// Checks if a and b are equal within a tolerance.
+// TODO NaN and Inf checks
+func withinTol(a, b, rtol, atol float64) bool {
+	return m.Abs(a-b) <= atol+rtol*m.Abs(b)
+}
+
+// Checks if all elements of slices a and b are equal within a tolerance.
+func allWithinTol(a, b []float64, rtol, atol float64) bool {
+	if a == nil || b == nil || len(a) != len(b) {
+		return false
+	}
+	tmp := true
+	for i := 0; (i < len(a)) && tmp; i++ {
+		tmp = tmp && withinTol(a[i], b[i], rtol, atol)
+	}
+	return tmp
+}
