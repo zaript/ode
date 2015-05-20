@@ -30,7 +30,7 @@ func Benchmark_NewSolverStepRKM_expODE(b *testing.B) {
 		tEnd := p.T[len(p.T)-1]
 		dt := p.Dt0
 
-		solverStep := NewSolverStepRKM(yPrimeExpODE, len(p.Y0), p)
+		solverStep := NewSolverStepRKM(yPrimeExpODE, p)
 		for t < tEnd {
 			dt = math.Min(dt, tEnd-t)
 			t, y, dt = solverStep(t, y, dt)
@@ -64,7 +64,7 @@ func Benchmark_NewSolverStepRK4_expODE(b *testing.B) {
 		tEnd := p.T[len(p.T)-1]
 		dt := p.Dt0
 
-		solverStep := NewSolverStepRK4(yPrimeExpODE, len(p.Y0))
+		solverStep := NewSolverStepRK4(yPrimeExpODE, p)
 		for t < tEnd {
 			dt = math.Min(dt, tEnd-t)
 			t, y, dt = solverStep(t, y, dt)
