@@ -40,23 +40,27 @@ func Test_HIRES(test *testing.T) {
 	}
 
 	hires := Problem{
-		YP:     hiresYPrime,
-		Y0:     []float64{1, 0, 0, 0, 0, 0, 0, 0.0057},
-		T:      []float64{0, tRef},
+		YP:   hiresYPrime,
+		Y0:   []float64{1, 0, 0, 0, 0, 0, 0, 0.0057},
+		T0:   0.0,
+		TEnd: tRef,
+	}
+
+	prm := Parameters{
 		Dt0:    1.1e-3,
 		ATol:   1.1e-6,
 		RTol:   1.1e-6,
 		Safety: 0.8,
 	}
 
-	solution, err := hires.Solve()
+	y, err := Solve(hires, prm)
 	if err != nil {
 		test.Error("RKM: HIRES failed.")
 	}
 
-	if !allWithinTol(solution[1], yRef, hires.RTol, hires.ATol) {
+	if !allWithinTol(y, yRef, prm.RTol, prm.ATol) {
 		// TODO turn this into nice log output
-		fmt.Println("y =", solution[1])
+		fmt.Println("y =", y)
 		fmt.Println("yRef =", yRef)
 		test.Error("RKM: HIRES failed.")
 	}

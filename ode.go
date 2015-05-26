@@ -33,60 +33,76 @@ import (
 
 // Returns solution y of a problem at time points t and an error.
 type Solver interface {
-	Solve() ([][]float64, error)
+	Solve(p Problem, prm Parameters) ([][]float64, error)
 }
 
-type Problem struct {
-	// required parameters
-	YP YPrime    // function to compute right side of the system
-	Y0 []float64 // initial values
-	T  []float64 // time points to find solution at
-	// T[0] = t0, T[len(T)-1] = tEnd, len(T) >= 2
+// Stepper return values are new t, y and error estimate.
+type Stepper interface {
+	Init(p *Problem, prm *Parameters)
+	Step(t float64, y []float64, dt float64) (float64, []float64, float64)
+}
 
-	// parameters with default values
+// Returns new value of dt.
+type Adapter interface {
+	Init(p *Problem, prm *Parameters)
+	Adapt(dt, e float64) float64
+}
+
+type YPrime func(t float64, y []float64) []float64
+
+type Problem struct {
+	YP   YPrime    // function to compute right side of the system
+	Y0   []float64 // initial values
+	T0   float64   // starting time
+	TEnd float64   // finish time
+}
+
+type Parameters struct {
 	Dt0    float64 // initial time step
 	ATol   float64 // absolute error tolerance
 	RTol   float64 // relative error tolerance
 	Safety float64 // safety factor on new step selection
 }
 
-type YPrime func(t float64, y []float64) []float64
-
-func (p Problem) Solve() ([][]float64, error) {
-
+func Solve(p Problem, prm Parameters) ([]float64, error) {
+	// TODO shouldn't this panic?
 	err := p.SanityCheck()
 	if err != nil {
 		return nil, err
 	}
-
-	ys := make([][]float64, len(p.T))
-	ys[0] = make([]float64, len(p.Y0))
-	copy(ys[0], p.Y0)
-
-	dt := p.Dt0
-	t := p.T[0]
-	step := NewSolverStepRKM(p.YP, p)
-	for i := 1; i < len(p.T); i++ {
-		y := make([]float64, len(p.Y0))
-		// use solution at previous step as new initial value
-		copy(y, ys[i-1])
-		for t < p.T[i] {
-			// we select appropriate dt before step to avoid corner case at
-			// t == p.T[i], which turns dt into 0
-			dt = math.Min(dt, p.T[i]-t)
-			t, y, dt = step(t, y, dt)
-		}
-
-		ys[i] = y
+	err = prm.SanityCheck()
+	if err != nil {
+		return nil, err
 	}
 
-	return ys, nil
+	s := new(RKM)
+	s.Init(&p, &prm)
+
+	a := new(BasicAdaptor)
+	a.Init(&p, &prm)
+
+	y := make([]float64, len(p.Y0))
+	copy(y, p.Y0)
+
+	dt := prm.Dt0
+	t := p.T0
+	e := 0.0
+	for t < p.TEnd {
+		// we select appropriate dt before step to avoid corner case at
+		// t == p.T[i], which turns dt into 0
+		dt = math.Min(dt, p.TEnd-t)
+
+		t, y, e = s.Step(t, y, dt)
+		dt = a.Adapt(dt, e)
+
+	}
+
+	return y, nil
 }
 
 // TODO All sanity checks should emit log messages.
 // TODO proper error messages
 func (p *Problem) SanityCheck() error {
-
 	if len(p.Y0) == 0 {
 		return errors.New("default error message")
 	}
@@ -95,23 +111,28 @@ func (p *Problem) SanityCheck() error {
 		if math.IsNaN(y) || math.IsInf(y, 0) {
 			return errors.New("default error message")
 		}
-
 	}
 
-	if len(p.T) < 2 {
+	if p.YP == nil {
 		return errors.New("default error message")
 	}
 
-	for _, t := range p.T {
-		if math.IsNaN(t) || math.IsInf(t, 0) {
-			return errors.New("NaN or Inf value")
-		}
-		// if t < p.T[i-1] {
-		// 	return errors.New("T is unsorted")
-		// }
-
+	if math.IsNaN(p.T0) || math.IsInf(p.T0, 0) {
+		return errors.New("NaN or Inf value")
 	}
 
+	if math.IsNaN(p.TEnd) || math.IsInf(p.TEnd, 0) {
+		return errors.New("NaN or Inf value")
+	}
+
+	if p.T0 > p.TEnd {
+		return errors.New("T is unsorted")
+	}
+
+	return nil
+}
+
+func (p *Parameters) SanityCheck() error {
 	if p.Dt0 <= 0 || math.IsNaN(p.Dt0) || math.IsInf(p.Dt0, 0) {
 		p.Dt0 = 1e-6 // default time step
 	}
@@ -124,23 +145,109 @@ func (p *Problem) SanityCheck() error {
 		p.RTol = 1e-6 // default rtol
 	}
 
-	if p.Safety <= 0 || p.Safety > 1 || math.IsNaN(p.Safety) || math.IsInf(p.Safety, 0) {
+	if p.Safety <= 0 || p.Safety > 1 ||
+		math.IsNaN(p.Safety) || math.IsInf(p.Safety, 0) {
 		p.Safety = 0.8 // default safety
-	}
-
-	if p.YP == nil {
-		return errors.New("default error message")
 	}
 
 	return nil
 }
 
+type RKM struct {
+	step solverStep
+}
+
+func (s *RKM) Init(p *Problem, prm *Parameters) {
+	s.step = NewSolverStepRKM(p.YP, len(p.Y0), prm.ATol, prm.Safety)
+}
+
+func (s *RKM) Step(t float64, y []float64, dt float64) (float64, []float64, float64) {
+	return s.step(t, y, dt)
+}
+
+// TODO find out what the name of this particular adaptor is.
+type BasicAdaptor struct {
+	safety float64
+	tol    float64
+}
+
+func (a *BasicAdaptor) Init(p *Problem, prm *Parameters) {
+	a.safety = prm.Safety
+	a.tol = prm.ATol
+}
+
+func (a *BasicAdaptor) Adapt(dt, e float64) float64 {
+	if e > 0 {
+		dt = a.safety * dt * math.Pow(a.tol/e, 0.2)
+	}
+	return dt
+}
+
 type solverStep func(t float64, y []float64, dt float64) (float64, []float64, float64)
 
-// Takes a function that calculates y' (y prime) and calculation
-// parameters.
+// Takes a function that calculates y' (y prime) and calculation parameters.
 // Returns a function that performs a single step of the
-// of the classical forth-order Runge-Kutta method.
+// Runge-Kutta-Merson method with adaptive step.
+func NewSolverStepRKM(yp YPrime, nEq int, tol, safety float64) solverStep {
+	// we only want to allocate memory for increments once to avoid excessive gc
+	k1 := make([]float64, nEq)
+	k2 := make([]float64, nEq)
+	k3 := make([]float64, nEq)
+	k4 := make([]float64, nEq)
+	k5 := make([]float64, nEq)
+	// TODO but now len(y) might be different from nEq, check required
+	solverStep :=
+		func(t float64, y []float64, dt float64) (float64, []float64, float64) {
+			copy(k1, y)
+			k1 = yp(t, k1)
+
+			copy(k2, y)
+			for iEq := range y {
+				k2[iEq] += dt * k1[iEq] / 3
+			}
+			k2 = yp(t+dt/3, k2)
+
+			copy(k3, y)
+			for iEq := range y {
+				k3[iEq] += (k1[iEq] + k2[iEq]) * dt / 6
+			}
+			k3 = yp(t+dt/3, k3)
+
+			copy(k4, y)
+			for iEq := range y {
+				k4[iEq] += (k1[iEq] + 3*k3[iEq]) * dt / 8
+			}
+			k4 = yp(t+dt/2, k4)
+
+			copy(k5, y)
+			for iEq := range y {
+				k5[iEq] += (k1[iEq] - 3*k3[iEq] + 4*k4[iEq]) * dt / 2
+			}
+			k5 = yp(t+dt, k5)
+
+			// Pick highest estimation of truncation error among all equations.
+			e := 0.
+			for iEq := range y {
+				tmp := math.Abs((2*k1[iEq] - 9*k3[iEq] + 8*k4[iEq] - k5[iEq]) * dt / 30)
+				e = math.Max(e, tmp)
+			}
+
+			// If error withing tolerance interval, proceed with the step.
+			if e < tol {
+				for iEq := range y {
+					y[iEq] += (k1[iEq] + 4*k4[iEq] + k5[iEq]) * dt / 6
+				}
+				t += dt
+			}
+
+			return t, y, e
+		}
+	return solverStep
+}
+
+// Takes a function that calculates y' (y prime) and calculation parameters.
+// Returns a function that performs a single step of the of the classical
+// forth-order Runge-Kutta method.
 func NewSolverStepRK4(yp YPrime, p Problem) solverStep {
 	// we only want to allocate memory for increments once to avoid excessive gc
 	dy1 := make([]float64, len(p.Y0))
@@ -175,72 +282,6 @@ func NewSolverStepRK4(yp YPrime, p Problem) solverStep {
 				y[iEq] += dt * (dy1[iEq] + 2*(dy2[iEq]+dy3[iEq]) + dy4[iEq]) / 6
 			}
 			return t + dt, y, dt
-		}
-	return solverStep
-}
-
-// Takes a function that calculates y' (y prime) and calculation
-// parameters.
-// Returns a function that performs a single step of the
-// Runge-Kutta-Merson method with adaptive step.
-func NewSolverStepRKM(yp YPrime, p Problem) solverStep {
-	// we only want to allocate memory for increments once to avoid excessive gc
-	dy1 := make([]float64, len(p.Y0))
-	dy2 := make([]float64, len(p.Y0))
-	dy3 := make([]float64, len(p.Y0))
-	dy4 := make([]float64, len(p.Y0))
-	dy5 := make([]float64, len(p.Y0))
-	// TODO but now len(y) might be different from nEq, check required
-	solverStep :=
-		func(t float64, y []float64, dt float64) (float64, []float64, float64) {
-			copy(dy1, y)
-			dy1 = yp(t, dy1)
-
-			copy(dy2, y)
-			for iEq := range y {
-				dy2[iEq] += dt * dy1[iEq] / 3
-			}
-			dy2 = yp(t+dt/3, dy2)
-
-			copy(dy3, y)
-			for iEq := range y {
-				dy3[iEq] += (dy1[iEq] + dy2[iEq]) * dt / 6
-			}
-			dy3 = yp(t+dt/3, dy3)
-
-			copy(dy4, y)
-			for iEq := range y {
-				dy4[iEq] += (dy1[iEq] + 3*dy3[iEq]) * dt / 8
-			}
-			dy4 = yp(t+dt/2, dy4)
-
-			copy(dy5, y)
-			for iEq := range y {
-				dy5[iEq] += (dy1[iEq] - 3*dy3[iEq] + 4*dy4[iEq]) * dt / 2
-			}
-			dy5 = yp(t+dt, dy5)
-
-			// Pick highest estimation of truncation error among all equations.
-			err := 0.
-			for iEq := range y {
-				tmp := math.Abs((2*dy1[iEq] - 9*dy3[iEq] + 8*dy4[iEq] - dy5[iEq]) * dt / 30)
-				err = math.Max(err, tmp)
-			}
-
-			// If error is in tolerance interval proceed with the step.
-			if err < p.ATol {
-				for iEq := range y {
-					y[iEq] += (dy1[iEq] + 4*dy4[iEq] + dy5[iEq]) * dt / 6
-				}
-				t += dt
-			}
-
-			// TODO this is really bad, need to rethink this check
-			if err != 0 {
-				dt = p.Safety * dt * math.Pow(p.ATol/err, 0.2)
-			}
-
-			return t, y, dt
 		}
 	return solverStep
 }
