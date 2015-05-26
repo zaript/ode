@@ -36,15 +36,15 @@ type Solver interface {
 	Solve(p Problem, prm Parameters) ([][]float64, error)
 }
 
-// Stepper return values are new t, y and error estimate.
 type Stepper interface {
 	Init(p *Problem, prm *Parameters)
+	// Step return values are new t, y and error estimate.
 	Step(t float64, y []float64, dt float64) (float64, []float64, float64)
 }
 
-// Returns new value of dt.
 type Adapter interface {
 	Init(p *Problem, prm *Parameters)
+	// Adapt returns new value of dt.
 	Adapt(dt, e float64) float64
 }
 
@@ -93,7 +93,9 @@ func Solve(p Problem, prm Parameters) ([]float64, error) {
 		dt = math.Min(dt, p.TEnd-t)
 
 		t, y, e = s.Step(t, y, dt)
-		dt = a.Adapt(dt, e)
+		if e > 0 {
+			dt = a.Adapt(dt, e)
+		}
 
 	}
 
@@ -177,9 +179,7 @@ func (a *BasicAdaptor) Init(p *Problem, prm *Parameters) {
 }
 
 func (a *BasicAdaptor) Adapt(dt, e float64) float64 {
-	if e > 0 {
-		dt = a.safety * dt * math.Pow(a.tol/e, 0.2)
-	}
+	dt = a.safety * dt * math.Pow(a.tol/e, 0.2)
 	return dt
 }
 
